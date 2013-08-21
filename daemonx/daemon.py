@@ -18,6 +18,10 @@ import time
 
 # TODO: taken from swift
 class LoggerFileObject(object):
+    """
+    Used to capture stderr/stdout.
+    """
+
     def __init__(self, logger):
         self.logger = logger
 
@@ -78,8 +82,15 @@ def drop_privileges(user):
     os.umask(0o22)  # ensure files are created with the correct privileges
 
 
-def get_command_line(dargs_parser, args_parser):
-    command_line = list(sys.argv[1:])
+def get_command_line(command_line, dargs_parser, args_parser):
+    """
+    Parses the command line.
+
+    Command line should be of the form:
+    [common daemon args] command [unique daemon args].
+
+    Returns common daemon args, command, and unique daemon args.
+    """
 
     command_index = None
     for i, arg in enumerate(command_line):
@@ -103,15 +114,6 @@ def get_command_line(dargs_parser, args_parser):
     return dargs, command_line[command_index], args
 
 
-# TODO: miminum get_logger that seems to work
-def get_loggerx(conf):
-    logger = logging.getLogger('daemon')
-    logger.setLevel(logging.DEBUG)
-    handler = logging.handlers.SysLogHandler(address='/dev/log')
-    logger.addHandler(handler)
-    return logger
-
-
 # TODO: taken from swfit
 def list_from_csv(comma_separated_str):
     """
@@ -124,6 +126,13 @@ def list_from_csv(comma_separated_str):
 
 
 def parse_run_name():
+    """
+    Returns the parts of the run name of the daemon.
+
+    The run name should be of the form: project-daemon
+
+    This is used to determine the config location/section name.
+    """
     command = os.path.split(sys.argv[0])[1]
     parts = command.split('-')
     if len(parts) != 2:
@@ -133,6 +142,9 @@ def parse_run_name():
 
 # TODO: taken from swift
 def read_config(conf_path):
+    """
+    Reads a config and returns its sections/values.
+    """
     c = ConfigParser()
     if not c.read(conf_path):
          print "Unable to read config from %s" % conf_path
@@ -145,7 +157,12 @@ def read_config(conf_path):
 
 
 class Daemon(object):
-    conf_section = 'daemonx'
+    """
+    A class for building daemons.
+
+    It takes care of things common to all daemons.
+    """
+
     commands = 'restart run_once start stop'.split()
     handler4logger = {}
 
@@ -164,13 +181,9 @@ class Daemon(object):
         self.user = self.conf['user']
         self.interval = int(self.conf.get('interval', 5))
 
-    # TODO: taken from swift
-    @classmethod
-    def capture_stdio(cls):
+    def capture_stdio(self):
         """
         Log unhandled exceptions, close stdio, capture stdout and stderr.
-
-        param logger: Logger object to use
         """
         # log uncaught exceptions
         sys.excepthook = lambda * exc_info: \
@@ -198,6 +211,13 @@ class Daemon(object):
         sys.stderr = LoggerFileObject(self.logger)
 
     def daemonize(self):
+        """
+        Daemonizes the current process.
+
+        Returns False if the process is not the daemon.
+
+        Returns True if process is the daemon.
+        """
         try:
             pid = os.fork()
             if pid > 0:
@@ -226,16 +246,31 @@ class Daemon(object):
 
     @classmethod
     def get_args_parser(cls):
+        """
+        Override to parse options unique to your daemon.
+
+        Returns an OptionParser.
+        """
         return OptionParser()
 
     @classmethod
     def get_dargs_parser(cls):
+        """
+        Returns an OptionParse for options common to all daemons.
+
+        Returns an OptionParser.
+        """
         # TODO: add things that can be overridden on command line
+        # run once
+        # verbose
         return OptionParser()
 
     # TODO: taken from swift
     @classmethod
     def get_logger(cls, conf):
+        """
+        Returns a logger configured from the conf.
+        """
         if not conf:
             conf = {}
         name = conf.get('log_name', 'daemonx')
@@ -294,6 +329,11 @@ class Daemon(object):
         return logger
 
     def get_pid(self):
+        """
+        Reads and returns the daemon's pid from pid file on disk>
+
+        Returns None on failure.
+        """
         try:
             with open(self.pid_file_path, 'r') as fd:
                 pid = int(fd.read().strip())
@@ -302,6 +342,11 @@ class Daemon(object):
         return pid
 
     def run(self):
+        """
+        Runs the daemon.
+
+        It calls run_once() or run_forever().
+        """
         # TODO: log when the daemon starts?
         # TODO: be able to specify run_once
         if False:
@@ -310,65 +355,83 @@ class Daemon(object):
             self.run_forever()
 
     @classmethod
-    def run_command(cls):
-        dargs_parser = Daemon.get_dargs_parser()
-        args_parser = Daemon.get_args_parser()
-
-        dargs, command, args = get_command_line(dargs_parser, args_parser)
-
-        project, daemon_name = parse_run_name()
-        conf_path = '/etc/%s/%s.conf' % (project, daemon_name)
+    def run_daemon(cls, conf_path, conf_section, command_line, project=None, daemon_name=None):
+        """
+        Sends the command specified on the command line to the daemon.
+        """
+        # read config
         global_conf = read_config(conf_path)
 
-        if Daemon.conf_section in global_conf:
-            conf = global_conf[Daemon.conf_section]
+        # get project/daemon name
+        if not (project and daemon_name):
+            # project from config file
+            daemon_name = conf_section
 
-            print 'a bunch of daemons'
-            # spawn a bunch of daemons
-            for conf_section in list_from_csv(conf['conf_sections']):
-                pid_file_path = '/var/run/%s/%s.pid' % (project, conf_section)
-                daemon = Daemon(
-                    global_conf, conf_section, pid_file_path, dargs, args)
-                method = getattr(daemon, command)
-                try:
-                    method()
-                except Exception, e:
-                    print e
-        else:
-            print 'a single daemon'
-            conf_section = daemon_name
-            pid_file_path = '/var/run/%s/%s.pid' % (project, daemon_name)
-            daemon = Daemon(
-                global_conf, conf_section, pid_file_path, dargs, args)
+        # parse command line, get command
+        dargs_parser = cls.get_dargs_parser()
+        args_parser = cls.get_args_parser()
+        dargs, command, args = get_command_line(
+            command_line, dargs_parser, args_parser)
 
-            method = getattr(daemon, command)
-            try:
-                method()
-            except Exception, e:
-                print e
+        # get pid file path
+        pid_file_path = '/var/run/%s/%s.pid' % (project, daemon_name)
+
+        # create daemon
+        daemon = cls(global_conf, conf_section, pid_file_path, dargs, args)
+
+        # get and run method for command
+        method = getattr(daemon, command)
+        try:
+            method()
+        except Exception, e:
+            print e
+
+    @classmethod
+    def run_command(cls):
+        """
+        Runs the command on the daemon.
+
+        Project and daemon name are determined from the command run.
+        """
+        project, daemon_name = parse_run_name()
+        conf_path = '/etc/%s/%s.conf' % (project, project)
+        cls.run_daemon(conf_path, daemon_name, list(sys.argv[1:]), project, daemon_name)
 
     def run_forever(self):
+        """
+        Run the daemon forever.
+
+        Sleeps as need be to not run more than once in each interval.
+
+        Calls run_once().
+        """
         time.sleep(random() * self.interval)
         while True:
             try:
                 self.run_once()
             except Exception:
-                # TODO: do something
-                pass
+                # TODO: do something, is this right?
+                self.logger.exception()
             time.sleep(self.interval)
 
     def restart(self):
+        """
+        Restarts the daemon.
+        """
         self.stop()
         self.start()
 
     def run_once(self):
-        self.logger.info('pid %d zaxx %d' % (os.getpid(), time.time()))
-        print 'pid: %d fez %d' % (os.getpid(), time.time())
+        """
+        Override this to define what the daemon does.
+        """
         # TODO: override this to define what your daemon does
-        # raise NotImplementedError('run_once not implemented')
-        pass
+        raise NotImplementedError('run_once not implemented')
 
     def start(self):
+        """
+        Starts the daemon.
+        """
         pid = self.get_pid()
         if pid:
             # TODO
@@ -378,6 +441,9 @@ class Daemon(object):
             self.run()
 
     def stop(self):
+        """
+        Stops the daemon.
+        """
         pid = self.get_pid()
 
         if not pid:
