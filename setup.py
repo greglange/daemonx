@@ -10,8 +10,8 @@ setup(
     name=name,
     version=version,
     description='Daemon',
-    author_email='glange@rackspace.com',
-    packages=find_packages(exclude=['test_qork', 'bin']),
+    author_email='greglange@gmrail.com',
+    packages=find_packages(exclude=['bin', 'example']),
     test_suite='nose.collector',
     classifiers=[
         'Development Status :: 4 - Beta',
