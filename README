@@ -1,5 +1,10 @@
-daemonx
-=======
+###############
+### daemonx ###
+###############
 
-A class for creating daemons.
+Code for creating and running daemons.
 
+See the README in ~/example and the code in ~/example and ~/daemonx/example for
+usage.
+
+This code is brand new and not yet very polished.

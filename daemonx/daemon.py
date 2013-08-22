@@ -1,9 +1,12 @@
+# partially based on
 # http://stackoverflow.com/questions/12676393/creating-python-2-7-daemon-with-pep-3143
+
+# partially based on how things are done in swift
 
 from __future__ import with_statement
 
-from ConfigParser import ConfigParser, NoSectionError, NoOptionError, \
-    RawConfigParser
+from ConfigParser import ConfigParser
+import errno
 import logging
 import logging.handlers
 from logging.handlers import SysLogHandler
@@ -12,6 +15,7 @@ import pwd
 import os
 from random import random
 import signal
+import socket
 import sys
 import time
 
@@ -114,6 +118,18 @@ def get_command_line(command_line, dargs_parser, args_parser):
     return dargs, command_line[command_index], args
 
 
+def get_project_from_conf_path(conf_path):
+    if not os.path.isfile(conf_path):
+        raise ValueError('File path expected')
+
+    conf_file = os.path.basename(conf_path)
+
+    if not conf_file.endswith('.conf'):
+        raise ValueError('Conf file should end with .conf')
+
+    return conf_file[:-len('.conf')]
+
+
 # TODO: taken from swfit
 def list_from_csv(comma_separated_str):
     """
@@ -147,8 +163,8 @@ def read_config(conf_path):
     """
     c = ConfigParser()
     if not c.read(conf_path):
-         print "Unable to read config from %s" % conf_path
-         sys.exit(1)
+        print "Unable to read config from %s" % conf_path
+        sys.exit(1)
     conf = {}
     for s in c.sections():
         conf.update({s: dict(c.items(s))})
@@ -167,16 +183,11 @@ class Daemon(object):
     handler4logger = {}
 
     def __init__(self, global_conf, conf_section, pid_file_path, dargs, args):
-        # TODO
-        # handle all these things can be overridden on command line
-
-        # TODO
         self.global_conf = global_conf
         self.conf = self.global_conf[conf_section]
         self.pid_file_path = pid_file_path
         self.dargs = dargs
         self.args = args
-        # TODO: pass in logger?
         self.logger = self.get_logger(self.conf)
         self.user = self.conf['user']
         self.interval = int(self.conf.get('interval', 5))
@@ -187,7 +198,7 @@ class Daemon(object):
         """
         # log uncaught exceptions
         sys.excepthook = lambda * exc_info: \
-            self.logger.critical(_('UNCAUGHT EXCEPTION'), exc_info=exc_info)
+            self.logger.critical('UNCAUGHT EXCEPTION', exc_info=exc_info)
 
         # collect stdio file desc not in use for logging
         stdio_files = [sys.stdin, sys.stdout, sys.stderr]
@@ -310,22 +321,6 @@ class Daemon(object):
             getattr(
                 logging, conf.get('log_level', 'INFO').upper(), logging.INFO))
 
-        # Setup logger with a StatsD client if so configured
-        statsd_host = conf.get('log_statsd_host')
-        if statsd_host:
-            statsd_port = int(conf.get('log_statsd_port', 8125))
-            base_prefix = conf.get('log_statsd_metric_prefix', '')
-            default_sample_rate = float(conf.get(
-                'log_statsd_default_sample_rate', 1))
-            sample_rate_factor = float(conf.get(
-                'log_statsd_sample_rate_factor', 1))
-            statsd_client = StatsdClient(statsd_host, statsd_port, base_prefix,
-                                        name, default_sample_rate,
-                                        sample_rate_factor)
-            logger.statsd_client = statsd_client
-        else:
-            logger.statsd_client = None
-
         return logger
 
     def get_pid(self):
@@ -355,7 +350,9 @@ class Daemon(object):
             self.run_forever()
 
     @classmethod
-    def run_daemon(cls, conf_path, conf_section, command_line, project=None, daemon_name=None):
+    def run_command(
+            cls, conf_path, conf_section, command_line, project=None,
+            daemon_name=None):
         """
         Sends the command specified on the command line to the daemon.
         """
@@ -364,10 +361,16 @@ class Daemon(object):
 
         # get project/daemon name
         if not (project and daemon_name):
-            # project from config file
+            project = get_project_from_conf_path(conf_path)
             daemon_name = conf_section
 
-        # parse command line, get command
+        # get/import class from config
+        import_target, class_name = \
+            global_conf[conf_section]['class'].rsplit('.', 1)
+        module = __import__(import_target, fromlist=[import_target])
+        daemon_class = getattr(module, class_name)
+
+        # parse command line, get command to run on daemon
         dargs_parser = cls.get_dargs_parser()
         args_parser = cls.get_args_parser()
         dargs, command, args = get_command_line(
@@ -377,7 +380,8 @@ class Daemon(object):
         pid_file_path = '/var/run/%s/%s.pid' % (project, daemon_name)
 
         # create daemon
-        daemon = cls(global_conf, conf_section, pid_file_path, dargs, args)
+        daemon = daemon_class(
+            global_conf, conf_section, pid_file_path, dargs, args)
 
         # get and run method for command
         method = getattr(daemon, command)
@@ -387,15 +391,16 @@ class Daemon(object):
             print e
 
     @classmethod
-    def run_command(cls):
+    def run_command_from_script(cls):
         """
         Runs the command on the daemon.
 
-        Project and daemon name are determined from the command run.
+        Project and daemon name are determined from the script run.
         """
         project, daemon_name = parse_run_name()
         conf_path = '/etc/%s/%s.conf' % (project, project)
-        cls.run_daemon(conf_path, daemon_name, list(sys.argv[1:]), project, daemon_name)
+        cls.run_command(
+            conf_path, daemon_name, list(sys.argv[1:]), project, daemon_name)
 
     def run_forever(self):
         """

@@ -1,0 +1,7 @@
+#!/usr/bin/env python
+
+from daemonx.example.daemon1 import Daemon1
+
+
+if __name__ == '__main__':
+    Daemon1.run_command_from_script()

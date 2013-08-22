@@ -22,5 +22,7 @@ setup(
         ],
     # removed for better compat
     install_requires=[],
-    scripts=[],
+    scripts=[
+        'bin/daemonx',
+    ],
     )

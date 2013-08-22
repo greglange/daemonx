@@ -1,20 +1,9 @@
 #!/usr/bin/env python
 
-# daemonx config_file section command
+from sys import argv
+
+from daemonx.daemon import Daemon
+
 
 if __name__ == '__main__':
-    # read config
-
-    sections = sections
-
-    # if list of sections
-
-    for seciton in sections:
-        do it for the section
-
-
-
-    # if a single class
-
-
-    pass
+    Daemon.run_command(argv[1], argv[2], argv[3:])

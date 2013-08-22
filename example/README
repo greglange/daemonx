@@ -1,0 +1,23 @@
+To run the example:
+
+1)  Install the daemonx module.  You can run "sudo python setup.py develop" to
+do that.
+
+1)  Edit daemonx.conf.  Put your username after "user =" in the first section.
+This is the user the daemons will run as.
+
+2)  Make the directory "/var/run/daemonx" and make it writable by your user.
+
+3)  Make the directory "/etc/daemonx' and copy daemonx.conf into it.  Make
+the file readable by your user.
+
+There are two ways to start/stop/restart the two example daemons.
+
+1)  Run the scripts in the example directory.  So, for example,
+"./daemonx-daemon1 start" will start the first example daemon.
+
+2)  Run the daemonx script in the ~/bin directory.  So, for example,
+"daemonx /etc/daemonx/daemonx.conf daemon1 start" will start the first
+example daemon.
+
+The daemons respond to the commands start, stop, restart, and run_once.
