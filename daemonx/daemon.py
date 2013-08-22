@@ -7,6 +7,7 @@ from __future__ import with_statement
 
 from ConfigParser import ConfigParser
 import errno
+# TODO: clean up the logging imports
 import logging
 import logging.handlers
 from logging.handlers import SysLogHandler
