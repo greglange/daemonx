@@ -95,27 +95,12 @@ def get_command_line(command_line, dargs_parser, args_parser):
 
     Returns common daemon args, command, and unique daemon args.
     """
-
-    command_index = None
-    for i, arg in enumerate(command_line):
-        if arg in Daemon.commands:
-            command_index = i
-
-    if command_index is None:
-        print 'Invalid command'
-        raise ValueError()
-
-    if dargs_parser:
-        dargs = dargs_parser.parse_args(command_line[0:command_index])
-    else:
-        dargs = None
-
-    if args_parser:
-        args = args_parser.parse_args(command_line[command_index + 1:])
-    else:
-        args = None
-
-    return dargs, command_line[command_index], args
+    dargs = dargs_parser.parse_args(command_line)
+    command = dargs[1][0]
+    if command not in Daemon.commands:
+        raise ValueError('Invalid daemon command')
+    args = args_parser.parse_args(dargs[1][1:])
+    return dargs, command, args
 
 
 def get_project_from_conf_path(conf_path):
@@ -272,9 +257,10 @@ class Daemon(object):
         Returns an OptionParser.
         """
         # TODO: add things that can be overridden on command line
-        # run once
-        # verbose
-        return OptionParser()
+        # right now, nothing
+        parser = OptionParser()
+        parser.disable_interspersed_args()
+        return parser
 
     # TODO: taken from swift
     @classmethod
@@ -376,6 +362,10 @@ class Daemon(object):
         dargs, command, args = get_command_line(
             command_line, dargs_parser, args_parser)
 
+        # check command
+        if command not in cls.commands:
+            raise ValueError('Invalid command')
+
         # get pid file path
         pid_file_path = '/var/run/%s/%s.pid' % (project, daemon_name)
 
@@ -452,7 +442,7 @@ class Daemon(object):
         pid = self.get_pid()
 
         if not pid:
-            # TODO: do something
+            print 'Daemon does not seem to be running'
             return
 
         # TODO
