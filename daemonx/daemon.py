@@ -170,6 +170,7 @@ class Daemon(object):
 
     def __init__(self, global_conf, conf_section, pid_file_path, dargs, args):
         self.global_conf = global_conf
+        self.conf_section = conf_section
         self.conf = self.global_conf[conf_section]
         self.pid_file_path = pid_file_path
         self.dargs = dargs
@@ -260,6 +261,9 @@ class Daemon(object):
         # TODO: add things that can be overridden on command line
         # right now, nothing
         parser = OptionParser()
+        parser.add_option(
+            "--eventlet_patch", action="store_false", dest="eventlet_patch",
+            default=False, help="add eventlet patch")
         parser.disable_interspersed_args()
         return parser
 

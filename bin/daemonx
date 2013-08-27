@@ -6,4 +6,8 @@ from daemonx.daemon import Daemon
 
 
 if __name__ == '__main__':
+    if '--eventlet_patch' in argv:
+        import eventlet
+        eventlet.monkey_patch()
+
     Daemon.run_command(argv[1], argv[2], argv[3:])
