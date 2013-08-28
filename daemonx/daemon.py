@@ -1,16 +1,31 @@
-# partially based on
-# http://stackoverflow.com/questions/12676393/creating-python-2-7-daemon-with-pep-3143
+# Copyright (c) 2013 Greg Lange
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
 
-# partially based on how things are done in swift
+# This file includes code taken from or based on code from:
+# https://github.com/openstack/swift
+# and
+# http://stackoverflow.com/questions/12676393/creating-python-2-7-daemon-with-pep-3143
+#
+# When the code was taken from swift (and then possibly modified), it's marked
+# by the comment "from swift".
 
 from __future__ import with_statement
 
 from ConfigParser import ConfigParser
 import errno
-# TODO: clean up the logging imports
 import logging
 import logging.handlers
-from logging.handlers import SysLogHandler
 from optparse import OptionParser
 import pwd
 import os
@@ -21,7 +36,7 @@ import sys
 import time
 
 
-# TODO: taken from swift
+# from swift
 class LoggerFileObject(object):
     """
     Used to capture stderr/stdout.
@@ -66,7 +81,7 @@ class LoggerFileObject(object):
         return self
 
 
-# TODO: taken from swift
+# from swift
 def drop_privileges(user):
     """
     Sets the userid/groupid of the current process, get session leader, etc.
@@ -116,7 +131,7 @@ def get_project_from_conf_path(conf_path):
     return conf_file[:-len('.conf')]
 
 
-# TODO: taken from swfit
+# from swift
 def list_from_csv(comma_separated_str):
     """
     Splits the str given and returns a properly stripped list of the comma
@@ -142,7 +157,7 @@ def parse_run_name():
     return parts
 
 
-# TODO: taken from swift
+# from swift
 def read_config(conf_path):
     """
     Reads a config and returns its sections/values.
@@ -179,6 +194,7 @@ class Daemon(object):
         self.user = self.conf['user']
         self.interval = int(self.conf.get('interval', 5))
 
+    # from swift
     def capture_stdio(self):
         """
         Log unhandled exceptions, close stdio, capture stdout and stderr.
@@ -204,7 +220,7 @@ class Daemon(object):
                 except OSError:
                     pass
 
-        # TODO: make the capture optional?
+        # FUTURE: make the capture optional?
         sys.stdout = LoggerFileObject(self.logger)
         sys.stderr = LoggerFileObject(self.logger)
 
@@ -232,7 +248,7 @@ class Daemon(object):
 
         signal.signal(signal.SIGTERM, kill_children)
 
-        # TODO: something that logs when the daemon is killed?
+        # FUTURE: something that logs when the daemon is killed?
 
         self.capture_stdio()
 
@@ -258,8 +274,7 @@ class Daemon(object):
 
         Returns an OptionParser.
         """
-        # TODO: add things that can be overridden on command line
-        # right now, nothing
+        # FUTURE: add things that can be overridden on command line
         parser = OptionParser()
         parser.add_option(
             "--eventlet_patch", action="store_false", dest="eventlet_patch",
@@ -267,7 +282,7 @@ class Daemon(object):
         parser.disable_interspersed_args()
         return parser
 
-    # TODO: taken from swift
+    # from swift
     @classmethod
     def get_logger(cls, conf):
         """
@@ -286,24 +301,27 @@ class Daemon(object):
 
         # facility for this logger will be set by last call wins
         facility = getattr(
-            SysLogHandler, conf.get('log_facility', 'LOG_LOCAL0'),
-            SysLogHandler.LOG_LOCAL0)
+            logging.handlers.SysLogHandler,
+            conf.get('log_facility', 'LOG_LOCAL0'),
+            logging.handlers.SysLogHandler.LOG_LOCAL0)
         udp_host = conf.get('log_udp_host')
         if udp_host:
-            udp_port = int(conf.get('log_udp_port',
-                                    logging.handlers.SYSLOG_UDP_PORT))
-            handler = SysLogHandler(address=(udp_host, udp_port),
-                                    facility=facility)
+            udp_port = int(
+                conf.get('log_udp_port',
+                logging.handlers.SYSLOG_UDP_PORT))
+            handler = logging.handlers.SysLogHandler(
+                address=(udp_host, udp_port), facility=facility)
         else:
             log_address = conf.get('log_address', '/dev/log')
             try:
-                handler = SysLogHandler(address=log_address, facility=facility)
+                handler = logging.handlers.SysLogHandler(
+                    address=log_address, facility=facility)
             except socket.error, e:
                 # Either /dev/log isn't a UNIX socket or it does not exist
                 # at all
                 if e.errno not in [errno.ENOTSOCK, errno.ENOENT]:
                     raise e
-                handler = SysLogHandler(facility=facility)
+                handler = logging.handlers.SysLogHandler(facility=facility)
         logger.addHandler(handler)
         cls.handler4logger[logger] = handler
 
@@ -331,14 +349,9 @@ class Daemon(object):
         """
         Runs the daemon.
 
-        It calls run_once() or run_forever().
+        It calls run_forever().
         """
-        # TODO: log when the daemon starts?
-        # TODO: be able to specify run_once
-        if False:
-            self.run_once()
-        else:
-            self.run_forever()
+        self.run_forever()
 
     @classmethod
     def run_command(
@@ -410,7 +423,6 @@ class Daemon(object):
             try:
                 self.run_once()
             except Exception:
-                # TODO: do something, is this right?
                 self.logger.exception()
             time.sleep(self.interval)
 
@@ -425,7 +437,6 @@ class Daemon(object):
         """
         Override this to define what the daemon does.
         """
-        # TODO: override this to define what your daemon does
         raise NotImplementedError('run_once not implemented')
 
     def start(self):
@@ -434,7 +445,6 @@ class Daemon(object):
         """
         pid = self.get_pid()
         if pid:
-            # TODO
             raise RuntimeError('Daemon alredy running')
 
         if self.daemonize():
@@ -450,9 +460,7 @@ class Daemon(object):
             print 'Daemon does not seem to be running'
             return
 
-        # TODO
         try:
-            # TODO: Timeout?
             while 1:
                 os.kill(pid, signal.SIGTERM)
                 time.sleep(.1)
