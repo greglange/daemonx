@@ -180,7 +180,7 @@ class Daemon(object):
     It takes care of things common to all daemons.
     """
 
-    commands = 'restart run_once start stop'.split()
+    commands = 'restart run_once start status stop'.split()
     handler4logger = {}
 
     def __init__(self, global_conf, conf_section, pid_file_path, dargs, args):
@@ -449,6 +449,16 @@ class Daemon(object):
 
         if self.daemonize():
             self.run()
+
+    def status(self):
+        """
+        Prints the status of the daemon.
+        """
+        pid = self.get_pid()
+        if pid:
+            print 'Daemon is running with pid: %d' % pid
+        else:
+            print 'Daemon is not running'
 
     def stop(self):
         """
