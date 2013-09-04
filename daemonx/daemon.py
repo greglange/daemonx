@@ -196,6 +196,7 @@ class Daemon(object):
 
     # from swift
     def capture_stdio(self):
+        return
         """
         Log unhandled exceptions, close stdio, capture stdout and stderr.
         """
@@ -423,7 +424,7 @@ class Daemon(object):
             try:
                 self.run_once()
             except Exception:
-                self.logger.exception()
+                self.logger.exception('run_once()')
             time.sleep(self.interval)
 
     def restart(self):
