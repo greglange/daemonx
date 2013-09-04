@@ -196,7 +196,6 @@ class Daemon(object):
 
     # from swift
     def capture_stdio(self):
-        return
         """
         Log unhandled exceptions, close stdio, capture stdout and stderr.
         """
