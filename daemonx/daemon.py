@@ -423,7 +423,7 @@ class Daemon(object):
             try:
                 self.run_once()
             except Exception:
-                self.logger.exception()
+                self.logger.exception('run_once()')
             time.sleep(self.interval)
 
     def restart(self):
