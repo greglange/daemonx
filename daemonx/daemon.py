@@ -250,11 +250,11 @@ class Daemon(object):
 
         # FUTURE: something that logs when the daemon is killed?
 
-        self.capture_stdio()
-
         with open(self.pid_file_path, 'w+') as fd:
             pid = os.getpid()
             fd.write('%d\n' % pid)
+
+        self.capture_stdio()
 
         return True
 
