@@ -192,7 +192,7 @@ class Daemon(object):
         self.args = args
         self.logger = self.get_logger(self.conf)
         self.user = self.conf['user']
-        self.interval = int(self.conf.get('interval', 5))
+        self.interval = int(self.conf.get('interval', 300))
 
     # from swift
     def capture_stdio(self):
