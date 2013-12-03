@@ -119,6 +119,77 @@ def get_command_line(command_line, dargs_parser, args_parser):
     return dargs, command, args
 
 
+def get_daemon(env):
+    return env['daemon_class'](
+        env['global_conf'], env['conf_section'], env['pid_file_path'],
+        env['dargs'], env['args'])
+
+
+def kill_child_process(pid):
+    start_time = time.time()
+    while time.time() - start_time < 5:
+        try:
+            ret = os.waitpid(pid, os.WNOHANG)
+        except OSError, e:
+            if str(e).find('No such process') == 0:
+                raise
+            else:
+                return
+        if ret != (0, 0):
+            break
+        time.sleep(1)
+
+    if ret == (0, 0):
+        try:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        except OSError, e:
+            if str(e).find('No such process') == 0:
+                raise
+
+
+def kill_children(*args):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    os.killpg(0, signal.SIGTERM)
+    sys.exit()
+
+
+def kill_process(pid):
+    try:
+        start_time = time.time()
+        while time.time() - start_time < 5:
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(1)
+    except OSError, e:
+        if str(e).find('No such process') > 0:
+            return
+
+    try:
+        start_time = time.time()
+        while time.time() - start_time < 5:
+            os.kill(pid, signal.SIGKILL)
+            time.sleep(1)
+    except OSError, e:
+        if str(e).find('No such process') > 0:
+            return
+
+    raise RuntimeError('Unable to kill process %d' % pid)
+
+
+def get_pid(env):
+    """
+    Reads and returns the daemon's pid from pid file on disk>
+
+    Returns None on failure.
+    """
+    try:
+        with open(env['pid_file_path'], 'r') as fd:
+            pid = int(fd.read().strip())
+    except IOError:
+        pid = None
+    return pid
+
+
 def get_project_from_conf_path(conf_path):
     if not os.path.isfile(conf_path):
         raise ValueError('File path expected')
@@ -180,19 +251,20 @@ class Daemon(object):
     It takes care of things common to all daemons.
     """
 
-    commands = 'restart run_once start status stop'.split()
+    commands = 'restart start status stop'.split()
     handler4logger = {}
 
     def __init__(self, global_conf, conf_section, pid_file_path, dargs, args):
         self.global_conf = global_conf
         self.conf_section = conf_section
-        self.conf = self.global_conf[conf_section]
         self.pid_file_path = pid_file_path
+        self.conf = self.global_conf[conf_section]
         self.dargs = dargs
         self.args = args
         self.logger = self.get_logger(self.conf)
         self.user = self.conf['user']
         self.interval = int(self.conf.get('interval', 300))
+        self.last_progress = None
 
     # from swift
     def capture_stdio(self):
@@ -227,36 +299,8 @@ class Daemon(object):
     def daemonize(self):
         """
         Daemonizes the current process.
-
-        Returns False if the process is not the daemon.
-
-        Returns True if process is the daemon.
         """
-        try:
-            pid = os.fork()
-            if pid > 0:
-                return False
-        except Exception:
-            raise RuntimeError('Fork failed')
-
-        drop_privileges(self.user)
-
-        def kill_children(*args):
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            os.killpg(0, signal.SIGTERM)
-            sys.exit()
-
-        signal.signal(signal.SIGTERM, kill_children)
-
-        # FUTURE: something that logs when the daemon is killed?
-
-        with open(self.pid_file_path, 'w+') as fd:
-            pid = os.getpid()
-            fd.write('%d\n' % pid)
-
         self.capture_stdio()
-
-        return True
 
     @classmethod
     def get_args_parser(cls):
@@ -332,19 +376,6 @@ class Daemon(object):
 
         return logger
 
-    def get_pid(self):
-        """
-        Reads and returns the daemon's pid from pid file on disk>
-
-        Returns None on failure.
-        """
-        try:
-            with open(self.pid_file_path, 'r') as fd:
-                pid = int(fd.read().strip())
-        except IOError:
-            pid = None
-        return pid
-
     def run(self):
         """
         Runs the daemon.
@@ -360,43 +391,51 @@ class Daemon(object):
         """
         Sends the command specified on the command line to the daemon.
         """
+        env = {
+            'conf_path': conf_path,
+            'conf_section': conf_section,
+        }
+
         # read config
-        global_conf = read_config(conf_path)
+        env['global_conf'] = read_config(conf_path)
+        env['conf'] = env['global_conf'][conf_section]
 
         # get project/daemon name
         if not (project and daemon_name):
-            project = get_project_from_conf_path(conf_path)
-            daemon_name = conf_section
+            project = get_project_from_conf_path(env['conf_path'])
+            daemon_name = env['conf_section']
+
+        env['project'] = project
+        env['daemon_name'] = daemon_name
 
         # get/import class from config
         import_target, class_name = \
-            global_conf[conf_section]['class'].rsplit('.', 1)
+            env['global_conf'][conf_section]['class'].rsplit('.', 1)
         module = __import__(import_target, fromlist=[import_target])
-        daemon_class = getattr(module, class_name)
+        env['daemon_class'] = getattr(module, class_name)
 
         # parse command line, get command to run on daemon
         dargs_parser = cls.get_dargs_parser()
         args_parser = cls.get_args_parser()
-        dargs, command, args = get_command_line(
+        env['dargs'], env['command'], env['args'] = get_command_line(
             command_line, dargs_parser, args_parser)
 
         # check command
-        if command not in cls.commands:
+        if env['command'] not in cls.commands:
             raise ValueError('Invalid command')
 
-        # get pid file path
-        pid_file_path = '/var/run/%s/%s.pid' % (project, daemon_name)
+        # get user
+        env['user'] = env['conf']['user']
 
-        # create daemon
-        daemon = daemon_class(
-            global_conf, conf_section, pid_file_path, dargs, args)
+        # get pid file path
+        env['pid_file_path'] = '/var/run/%s/%s.pid' % \
+            (env['project'], env['daemon_name'])
+
+        env['pid'] = get_pid(env)
 
         # get and run method for command
-        method = getattr(daemon, command)
-        try:
-            method()
-        except Exception, e:
-            print e
+        method = getattr(env['daemon_class'], env['command'])
+        method(env)
 
     @classmethod
     def run_command_from_script(cls):
@@ -426,12 +465,15 @@ class Daemon(object):
                 self.logger.exception('run_once()')
             time.sleep(self.interval)
 
-    def restart(self):
+    @classmethod
+    def restart(cls, env):
         """
         Restarts the daemon.
         """
-        self.stop()
-        self.start()
+        if env['pid']:
+            cls.stop(env)
+            env['pid'] = None
+        cls.start(env)
 
     def run_once(self):
         """
@@ -439,44 +481,71 @@ class Daemon(object):
         """
         raise NotImplementedError('run_once not implemented')
 
-    def start(self):
+    @classmethod
+    def start(cls, env):
         """
         Starts the daemon.
         """
-        pid = self.get_pid()
-        if pid:
+        # check to see if daemon is already running
+        if env['pid']:
             raise RuntimeError('Daemon alredy running')
 
-        if self.daemonize():
-            self.run()
+        # daemonize things
+        if os.fork() > 0:
+            return
 
-    def status(self):
+        # drop privs
+        drop_privileges(env['user'])
+
+        # write pid
+        with open(env['pid_file_path'], 'w+') as fd:
+            pid = os.getpid()
+            fd.write('%d\n' % pid)
+
+        # fork to watcher and worker processes
+        env['pid'] = os.fork()
+        if env['pid'] > 0:
+            # watcher process
+            signal.signal(signal.SIGTERM, kill_children)
+
+            while True:
+                # TODO: not 5
+                if False:
+                    kill_child_process(env['pid'])
+                    daemon = get_daemon(env)
+                    env['pid'] = os.fork()
+                    if env['pid'] == 0:
+                        daemon.daemonize()
+                        daemon.run()
+                        sys.exit()
+                # TODO: not 1
+                time.sleep(1)
+        else:
+            # worker process
+            daemon = get_daemon(env)
+            daemon.daemonize()
+            daemon.run()
+            sys.exit()
+
+    @classmethod
+    def status(cls, env):
         """
         Prints the status of the daemon.
         """
-        pid = self.get_pid()
-        if pid:
-            print 'Daemon is running with pid: %d' % pid
+        if env['pid']:
+            print 'Daemon is running with pid: %d' % env['pid']
         else:
             print 'Daemon is not running'
 
-    def stop(self):
+    @classmethod
+    def stop(cls, env):
         """
         Stops the daemon.
         """
-        pid = self.get_pid()
-
-        if not pid:
+        if not env['pid']:
             print 'Daemon does not seem to be running'
             return
 
-        try:
-            while 1:
-                os.kill(pid, signal.SIGTERM)
-                time.sleep(.1)
-        except OSError, e:
-            if str(e).find('No such process') > 0:
-                if os.path.exists(self.pid_file_path):
-                    os.remove(self.pid_file_path)
-                else:
-                    raise
+        kill_process(env['pid'])
+        if os.path.exists(env['pid_file_path']):
+            os.remove(env['pid_file_path'])
