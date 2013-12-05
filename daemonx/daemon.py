@@ -102,6 +102,13 @@ def drop_privileges(user):
     os.umask(0o22)  # ensure files are created with the correct privileges
 
 
+def get_check_progress_time(conf):
+    interval = get_interval(conf)
+    check_progress_time = int(conf.get('check_progress_time', 0))
+    if check_progress_time:
+        return max(interval * 1.1, check_progress_time)
+    return 0
+
 def get_command_line(command_line, dargs_parser, args_parser):
     """
     Parses the command line.
@@ -123,6 +130,10 @@ def get_daemon(env):
     return env['daemon_class'](
         env['global_conf'], env['conf_section'], env['pid_file_path'],
         env['dargs'], env['args'])
+
+
+def get_interval(conf):
+    return int(conf.get('interval', 300))
 
 
 def kill_child_process(pid):
@@ -244,6 +255,13 @@ def read_config(conf_path):
     return conf
 
 
+def run_worker(env):
+    daemon = get_daemon(env)
+    daemon.daemonize()
+    daemon.run()
+    sys.exit()
+
+
 class Daemon(object):
     """
     A class for building daemons.
@@ -251,7 +269,7 @@ class Daemon(object):
     It takes care of things common to all daemons.
     """
 
-    commands = 'restart start status stop'.split()
+    commands = 'restart run_once start status stop'.split()
     handler4logger = {}
 
     def __init__(self, global_conf, conf_section, pid_file_path, dargs, args):
@@ -262,8 +280,8 @@ class Daemon(object):
         self.dargs = dargs
         self.args = args
         self.logger = self.get_logger(self.conf)
-        self.user = self.conf['user']
-        self.interval = int(self.conf.get('interval', 300))
+        self.interval = get_interval(self.conf)
+        self.check_progress_time = get_check_progress_time(self.conf)
         self.last_progress = None
 
     # from swift
@@ -376,6 +394,27 @@ class Daemon(object):
 
         return logger
 
+    @classmethod
+    def made_progress(cls, env):
+        if not os.path.exists(env['pid_file_path']):
+            cls.write_pid_file(env)
+
+        if not env['check_progress_time']:
+            return True
+
+        stat = os.stat(env['pid_file_path'])
+        return time.time() - stat.st_mtime < env['check_progress_time']
+
+    @classmethod
+    def restart(cls, env):
+        """
+        Restarts the daemon.
+        """
+        if env['pid']:
+            cls.stop(env)
+            env['pid'] = None
+        cls.start(env)
+
     def run(self):
         """
         Runs the daemon.
@@ -410,7 +449,7 @@ class Daemon(object):
 
         # get/import class from config
         import_target, class_name = \
-            env['global_conf'][conf_section]['class'].rsplit('.', 1)
+            env['conf']['class'].rsplit('.', 1)
         module = __import__(import_target, fromlist=[import_target])
         env['daemon_class'] = getattr(module, class_name)
 
@@ -427,15 +466,32 @@ class Daemon(object):
         # get user
         env['user'] = env['conf']['user']
 
-        # get pid file path
+        # get pid file path, pid
         env['pid_file_path'] = '/var/run/%s/%s.pid' % \
             (env['project'], env['daemon_name'])
 
         env['pid'] = get_pid(env)
 
-        # get and run method for command
-        method = getattr(env['daemon_class'], env['command'])
-        method(env)
+        # get progress check related values
+        env['interval'] = get_interval(env['conf'])
+        env['check_progress_time'] = get_check_progress_time(env['conf'])
+
+        if env['check_progress_time']:
+            env['progress_sleep_time'] = .1 * env['check_progress_time']
+        else:
+            env['progress_sleep_time'] = 300
+
+        # drop privs
+        drop_privileges(env['user'])
+
+        # run command
+        if env['command'] == 'run_once':
+            daemon = get_daemon(env)
+            daemon.daemonize()
+            daemon.run_once()
+        else:
+            method = getattr(env['daemon_class'], env['command'])
+            method(env)
 
     @classmethod
     def run_command_from_script(cls):
@@ -465,16 +521,6 @@ class Daemon(object):
                 self.logger.exception('run_once()')
             time.sleep(self.interval)
 
-    @classmethod
-    def restart(cls, env):
-        """
-        Restarts the daemon.
-        """
-        if env['pid']:
-            cls.stop(env)
-            env['pid'] = None
-        cls.start(env)
-
     def run_once(self):
         """
         Override this to define what the daemon does.
@@ -494,38 +540,32 @@ class Daemon(object):
         if os.fork() > 0:
             return
 
-        # drop privs
-        drop_privileges(env['user'])
-
         # write pid
-        with open(env['pid_file_path'], 'w+') as fd:
-            pid = os.getpid()
-            fd.write('%d\n' % pid)
+        cls.write_pid_file(env)
+
+        class State(object):
+            pass
+
+        state = State()
 
         # fork to watcher and worker processes
-        env['pid'] = os.fork()
-        if env['pid'] > 0:
+        state.pid = os.fork()
+        if state.pid > 0:
             # watcher process
             signal.signal(signal.SIGTERM, kill_children)
 
             while True:
-                # TODO: not 5
-                if False:
-                    kill_child_process(env['pid'])
-                    daemon = get_daemon(env)
-                    env['pid'] = os.fork()
-                    if env['pid'] == 0:
-                        daemon.daemonize()
-                        daemon.run()
-                        sys.exit()
-                # TODO: not 1
-                time.sleep(1)
+                if not cls.made_progress(env):
+                    # kill worker process
+                    kill_child_process(state.pid)
+                    state.pid = os.fork()
+                    if state.pid == 0:
+                        # worker process
+                        run_worker(env)
+                time.sleep(env['progress_sleep_time'])
         else:
             # worker process
-            daemon = get_daemon(env)
-            daemon.daemonize()
-            daemon.run()
-            sys.exit()
+            run_worker(env)
 
     @classmethod
     def status(cls, env):
@@ -549,3 +589,23 @@ class Daemon(object):
         kill_process(env['pid'])
         if os.path.exists(env['pid_file_path']):
             os.remove(env['pid_file_path'])
+
+
+    def update_progress_marker(self, force=False):
+        update = False
+        if force:
+            update = True
+        elif not self.last_progress:
+            update = True
+        elif .1 * self.check_progress_time < time.time() - self.last_progress:
+            update = True
+
+        if update:
+            os.utime(self.pid_file_path, None)
+            self.last_progress = time.time()
+
+    @classmethod
+    def write_pid_file(cls, env):
+        with open(env['pid_file_path'], 'w+') as fd:
+            pid = os.getpid()
+            fd.write('%d\n' % pid)
