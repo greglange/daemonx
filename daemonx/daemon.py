@@ -592,6 +592,8 @@ class Daemon(object):
 
 
     def update_progress_marker(self, force=False):
+        if not self.check_progress_time:
+            return
         update = False
         if force:
             update = True
