@@ -470,6 +470,13 @@ class Daemon(object):
         env['pid_file_path'] = '/var/run/%s/%s.pid' % \
             (env['project'], env['daemon_name'])
 
+        # create /var/run/project directory if it doesn't exist
+        run_dir = '/var/run/%s' % env['project']
+        if not os.path.exists(run_dir):
+            os.mkdir(run_dir, 0755)
+            user = pwd.getpwnam(env['user'])
+            os.chown(run_dir, user[2], user[3])
+
         env['pid'] = get_pid(env)
 
         # get progress check related values
