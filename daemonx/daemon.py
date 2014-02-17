@@ -398,14 +398,14 @@ class Daemon(object):
 
     @classmethod
     def made_progress(cls, env):
-        if not os.path.exists(env['pid_file_path']):
-            cls.write_pid_file(env)
-
         if not env['check_progress_time']:
             return True
 
-        stat = os.stat(env['pid_file_path'])
-        return time.time() - stat.st_mtime < env['check_progress_time']
+        try:
+            stat = os.stat(env['pid_file_path'])
+            return time.time() - stat.st_mtime < env['check_progress_time']
+        except OSError:
+            return True
 
     @classmethod
     def restart(cls, env):
@@ -612,7 +612,10 @@ class Daemon(object):
             update = True
 
         if update:
-            os.utime(self.pid_file_path, None)
+            try:
+                os.utime(self.pid_file_path, None)
+            except OSError:
+                pass
             self.last_progress = time.time()
 
     @classmethod
