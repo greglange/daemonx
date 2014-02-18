@@ -295,23 +295,6 @@ class Daemon(object):
         sys.excepthook = lambda * exc_info: \
             self.logger.critical('UNCAUGHT EXCEPTION', exc_info=exc_info)
 
-        # collect stdio file desc not in use for logging
-        stdio_files = [sys.stdin, sys.stdout, sys.stderr]
-
-        with open(os.devnull, 'r+b') as nullfile:
-            # close stdio (excludes fds open for logging)
-            for f in stdio_files:
-                # some platforms throw an error when attempting an stdin flush
-                try:
-                    f.flush()
-                except IOError:
-                    pass
-
-                try:
-                    os.dup2(nullfile.fileno(), f.fileno())
-                except OSError:
-                    pass
-
         # FUTURE: make the capture optional?
         sys.stdout = LoggerFileObject(self.logger)
         sys.stderr = LoggerFileObject(self.logger)
@@ -432,6 +415,10 @@ class Daemon(object):
         """
         Sends the command specified on the command line to the daemon.
         """
+        # really close stdin, stdout, stderr
+        for fd in [0, 1, 2]:
+            os.close(fd)
+
         env = {
             'conf_path': conf_path,
             'conf_section': conf_section,
