@@ -257,10 +257,14 @@ def read_config(conf_path):
     return conf
 
 
-def run_worker(env):
+def run_worker(env, run_once=False):
     daemon = get_daemon(env)
     daemon.daemonize()
-    daemon.run()
+    if run_once:
+        daemon.run_once()
+        env['cls'].delete_pid_file(env)
+    else:
+        daemon.run()
     sys.exit()
 
 
@@ -304,6 +308,11 @@ class Daemon(object):
         Daemonizes the current process.
         """
         self.capture_stdio()
+
+    @classmethod
+    def delete_pid_file(cls, env):
+        if os.path.exists(env['pid_file_path']):
+            os.remove(env['pid_file_path'])
 
     @classmethod
     def get_args_parser(cls):
@@ -415,11 +424,8 @@ class Daemon(object):
         """
         Sends the command specified on the command line to the daemon.
         """
-        # really close stdin, stdout, stderr
-        for fd in [0, 1, 2]:
-            os.close(fd)
-
         env = {
+            'cls': cls,
             'conf_path': conf_path,
             'conf_section': conf_section,
         }
@@ -473,18 +479,21 @@ class Daemon(object):
         env['check_progress_time'] = get_check_progress_time(env['conf'])
 
         if env['check_progress_time']:
-            env['progress_sleep_time'] = .1 * env['check_progress_time']
+            env['progress_sleep_time'] = \
+                max(1, .1 * env['check_progress_time'])
         else:
-            env['progress_sleep_time'] = 300
+            if env['command'] == 'run_once':
+                env['progress_sleep_time'] = 5
+            else:
+                env['progress_sleep_time'] = .1 * env['interval']
 
         # drop privs
         drop_privileges(env['user'])
 
         # run command
         if env['command'] == 'run_once':
-            daemon = get_daemon(env)
-            daemon.daemonize()
-            daemon.run_once()
+            method = getattr(env['daemon_class'], 'start')
+            method(env, run_once=True)
         else:
             method = getattr(env['daemon_class'], env['command'])
             method(env)
@@ -524,13 +533,18 @@ class Daemon(object):
         raise NotImplementedError('run_once not implemented')
 
     @classmethod
-    def start(cls, env):
+    def start(cls, env, run_once=False):
         """
         Starts the daemon.
         """
         # check to see if daemon is already running
         if env['pid']:
-            raise RuntimeError('Daemon alredy running')
+            print 'Daemon appears to be already running'
+            sys.exit()
+
+        # really close stdin, stdout, stderr
+        for fd in [0, 1, 2]:
+            os.close(fd)
 
         # daemonize things
         if os.fork() > 0:
@@ -557,11 +571,15 @@ class Daemon(object):
                     state.pid = os.fork()
                     if state.pid == 0:
                         # worker process
-                        run_worker(env)
+                        os.utime(env['pid_file_path'], None)
+                        run_worker(env, run_once)
                 time.sleep(env['progress_sleep_time'])
+                if run_once:
+                    if not os.path.exists(env['pid_file_path']):
+                        sys.exit()
         else:
             # worker process
-            run_worker(env)
+            run_worker(env, run_once)
 
     @classmethod
     def status(cls, env):
@@ -583,9 +601,7 @@ class Daemon(object):
             return
 
         kill_process(env['pid'])
-        if os.path.exists(env['pid_file_path']):
-            os.remove(env['pid_file_path'])
-
+        cls.delete_pid_file(env)
 
     def update_progress_marker(self, force=False):
         if not self.check_progress_time:
