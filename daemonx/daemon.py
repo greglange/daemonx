@@ -23,6 +23,7 @@
 from __future__ import with_statement
 
 from ConfigParser import ConfigParser
+from eventlet import Timeout
 import errno
 import grp
 import logging
@@ -573,10 +574,19 @@ class Daemon(object):
                         # worker process
                         os.utime(env['pid_file_path'], None)
                         run_worker(env, run_once)
-                time.sleep(env['progress_sleep_time'])
                 if run_once:
-                    if not os.path.exists(env['pid_file_path']):
+                    try:
+                        with Timeout(env['progress_sleep_time']):
+                            os.waitpid(pid)
+
+                        if not os.path.exists(env['pid_file_path']):
+                            sys.exit()
+                    except OSError:
                         sys.exit()
+                    except Timeout:
+                        pass
+                else:
+                    time.sleep(env['progress_sleep_time'])
         else:
             # worker process
             run_worker(env, run_once)
