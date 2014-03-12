@@ -577,7 +577,7 @@ class Daemon(object):
                 if run_once:
                     try:
                         with Timeout(env['progress_sleep_time']):
-                            os.waitpid(pid)
+                            os.waitpid(state.pid, 0)
 
                         if not os.path.exists(env['pid_file_path']):
                             sys.exit()
