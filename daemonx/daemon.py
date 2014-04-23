@@ -262,8 +262,10 @@ def run_worker(env, run_once=False):
     daemon = get_daemon(env)
     daemon.daemonize()
     if run_once:
-        daemon.run_once()
-        env['cls'].delete_pid_file(env)
+        try:
+            daemon.run_once()
+        finally:
+            env['cls'].delete_pid_file(env)
     else:
         daemon.run()
     sys.exit()
