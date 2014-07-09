@@ -23,7 +23,6 @@
 from __future__ import with_statement
 
 from ConfigParser import ConfigParser
-from eventlet import Timeout
 import errno
 import grp
 import logging
@@ -36,6 +35,9 @@ import signal
 import socket
 import sys
 import time
+
+
+from daemonx.utils import Timeout, TimeoutError
 
 
 # from swift
@@ -536,26 +538,7 @@ class Daemon(object):
         raise NotImplementedError('run_once not implemented')
 
     @classmethod
-    def start(cls, env, run_once=False):
-        """
-        Starts the daemon.
-        """
-        # check to see if daemon is already running
-        if env['pid']:
-            print 'Daemon appears to be already running'
-            sys.exit()
-
-        # really close stdin, stdout, stderr
-        for fd in [0, 1, 2]:
-            os.close(fd)
-
-        # daemonize things
-        if os.fork() > 0:
-            return
-
-        # write pid
-        cls.write_pid_file(env)
-
+    def run_worker(cls, env, run_once=False):
         class State(object):
             pass
 
@@ -582,16 +565,41 @@ class Daemon(object):
                             os.waitpid(state.pid, 0)
 
                         if not os.path.exists(env['pid_file_path']):
-                            sys.exit()
+                            return
                     except OSError:
-                        sys.exit()
-                    except Timeout:
+                        return
+                    except TimeoutError:
                         pass
                 else:
                     time.sleep(env['progress_sleep_time'])
         else:
             # worker process
             run_worker(env, run_once)
+
+    @classmethod
+    def start(cls, env, run_once=False):
+        """
+        Starts the daemon.
+        """
+        # check to see if daemon is already running
+        if env['pid']:
+            print 'Daemon appears to be already running'
+            sys.exit()
+
+        # really close stdin, stdout, stderr
+        for fd in [0, 1, 2]:
+            os.close(fd)
+
+        # daemonize things
+        if os.fork() > 0:
+            return
+
+        try:
+            # write pid
+            cls.write_pid_file(env)
+            cls.run_worker(env, run_once)
+        finally:
+            env['cls'].delete_pid_file(env)
 
     @classmethod
     def status(cls, env):
