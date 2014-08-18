@@ -331,7 +331,7 @@ class Daemon(object):
     @classmethod
     def get_dargs_parser(cls):
         """
-        Returns an OptionParse for options common to all daemons.
+        Returns an OptionParser for options common to all daemons.
 
         Returns an OptionParser.
         """
@@ -455,7 +455,7 @@ class Daemon(object):
 
         # parse command line, get command to run on daemon
         dargs_parser = cls.get_dargs_parser()
-        args_parser = cls.get_args_parser()
+        args_parser = env['daemon_class'].get_args_parser()
         env['dargs'], env['command'], env['args'] = get_command_line(
             command_line, dargs_parser, args_parser)
 
