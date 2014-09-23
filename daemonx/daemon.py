@@ -583,8 +583,17 @@ class Daemon(object):
         """
         # check to see if daemon is already running
         if env['pid']:
-            print 'Daemon appears to be already running'
-            sys.exit()
+            # check to see if there is a process with that pid
+            try:
+                 # there is a process with this pid
+                 os.kill(env['pid'], 0)
+                 print 'Daemon appears to be already running'
+                 sys.exit()
+            except OSError, e:
+                 # there is not a process with this pid
+                 if not e.errno == errno.ESRCH:
+                     raise
+                 env['pid'] = None
 
         # really close stdin, stdout, stderr
         for fd in [0, 1, 2]:
