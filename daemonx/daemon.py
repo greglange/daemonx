@@ -485,12 +485,12 @@ class Daemon(object):
 
         if env['check_progress_time']:
             env['progress_sleep_time'] = \
-                max(1, .1 * env['check_progress_time'])
+                max(1, int(.1 * env['check_progress_time']))
         else:
             if env['command'] == 'run_once':
                 env['progress_sleep_time'] = 5
             else:
-                env['progress_sleep_time'] = .1 * env['interval']
+                env['progress_sleep_time'] = int(.1 * env['interval'])
 
         # drop privs
         drop_privileges(env['user'])
