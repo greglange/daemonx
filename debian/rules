@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+# Verbose mode
+#export DH_VERBOSE=1
+unexport CPPFLAGS
+unexport CFLAGS
+unexport CXXFLAGS
+unexport FFLAGS
+unexport LDFLAGS
+
+#exports specified using stdeb Setup-Env-Vars:
+export DH_OPTIONS=--buildsystem=python_distutils
+
+
+%:
+	dh $@
+
