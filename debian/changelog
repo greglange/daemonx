@@ -1,3 +1,9 @@
+daemonx (1.0.21-1) unstable; urgency=low
+
+  * Adds debug run mode
+
+ -- Greg Lange <glange@rackspace.com>  Thu, 18 Feb 2016 19:19:37 +0000
+
 daemonx (1.0.20-1) unstable; urgency=low
 
   * Bumping version for new build system.
