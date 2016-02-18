@@ -85,6 +85,21 @@ class LoggerFileObject(object):
         return self
 
 
+def check_pid(env):
+    if env['pid']:
+        # check to see if there is a process with that pid
+        try:
+             # there is a process with this pid
+             os.kill(env['pid'], 0)
+             print 'Daemon appears to be already running'
+             sys.exit()
+        except OSError, e:
+             # there is not a process with this pid
+             if not e.errno == errno.ESRCH:
+                 raise
+             env['pid'] = None
+
+
 # from swift
 def drop_privileges(user):
     """
@@ -280,7 +295,7 @@ class Daemon(object):
     It takes care of things common to all daemons.
     """
 
-    commands = 'restart run_once start status stop'.split()
+    commands = 'restart run_once run_once_debug start status stop'.split()
     handler4logger = {}
 
     def __init__(self, global_conf, conf_section, pid_file_path, dargs, args):
@@ -499,6 +514,9 @@ class Daemon(object):
         if env['command'] == 'run_once':
             method = getattr(env['daemon_class'], 'start')
             method(env, run_once=True)
+        elif env['command'] == 'run_once_debug':
+            method = getattr(env['daemon_class'], 'start_debug')
+            method(env)
         else:
             method = getattr(env['daemon_class'], env['command'])
             method(env)
@@ -576,24 +594,14 @@ class Daemon(object):
             # worker process
             run_worker(env, run_once)
 
+
     @classmethod
     def start(cls, env, run_once=False):
         """
         Starts the daemon.
         """
         # check to see if daemon is already running
-        if env['pid']:
-            # check to see if there is a process with that pid
-            try:
-                 # there is a process with this pid
-                 os.kill(env['pid'], 0)
-                 print 'Daemon appears to be already running'
-                 sys.exit()
-            except OSError, e:
-                 # there is not a process with this pid
-                 if not e.errno == errno.ESRCH:
-                     raise
-                 env['pid'] = None
+        check_pid(env)
 
         # really close stdin, stdout, stderr
         for fd in [0, 1, 2]:
@@ -609,6 +617,20 @@ class Daemon(object):
             cls.run_worker(env, run_once)
         finally:
             env['cls'].delete_pid_file(env)
+
+        try:
+            # write pid
+            cls.write_pid_file(env)
+            cls.run_worker(env, run_once)
+        finally:
+            env['cls'].delete_pid_file(env)
+
+    @classmethod
+    def start_debug(cls, env):
+        # check to see if daemon is already running
+        check_pid(env)
+        daemon = get_daemon(env)
+        daemon.run_once()
 
     @classmethod
     def status(cls, env):
